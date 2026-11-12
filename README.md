@@ -1,42 +1,54 @@
-# 🛰️ Satellite Catalog Service (STAC Mirror)
+# 🛰️ Satellite Catalog Service (STAC Mirror & Ingestion Engine)
 
-Высокопроизводительный асинхронный микросервис на языке **Rust** для локального зеркалирования пространственно-временных каталогов спутниковых данных (**STAC API**). 
+Высокопроизводительный асинхронный микросервис и готовая локальная инфраструктура на языке **Rust** для зеркалирования, индексации и раздачи пространственно-временных каталогов спутниковых данных (**STAC API**).
 
-Сервис реализует транзитный конвейер без сохранения промежуточных файлов на локальный диск: он подключается к множеству публичных STAC-провайдеров (Microsoft Planetary Computer, AWS Element84, USGS), параллельно скачивает тяжелые геоданные (COG, NetCDF) в память, стримит их напрямую в объектное хранилище **MinIO (S3)**, переписывает ссылки на ассеты и выполняет пакетную запись метаданных в пространственную СУБД **pgSTAC (PostgreSQL + PostGIS)**.
+Сервис реализует сквозной транзитный конвейер без сохранения промежуточных файлов на локальный диск: он подключается к публичным STAC-провайдерам (Microsoft Planetary Computer, AWS Element84, USGS), прозрачно подписывает закрытые запросы через HTTP Middleware, параллельно стримит геоданные (COG, NetCDF, Parquet) напрямую в объектное хранилище **MinIO (S3)**, переписывает ссылки на ассеты с поддержкой расширения `alternate` и выполняет запись метаданных в пространственную СУБД **pgSTAC (PostgreSQL + PostGIS)**.
 
 ---
 
-## 🏗 Архитектура и поток данных
+## 🏗 Архитектура экосистемы
 
 ```text
 [Удаленные STAC APIs] (Microsoft PC, Element84, USGS)
          │
          ▼ (Поиск и фильтрация по BBOX / датам / облачности)
-[SatelliteCatalogService] (Rust + Tokio + Reqwest)
+[SatelliteCatalogService] (Rust + Tokio + Reqwest Middleware)
          │
-         ├──► Параллельный стрим файлов (.tif, .nc) ──► [MinIO Object Storage (S3)]
-         │                                                        │
-         ├──► Перезапись ссылок (href -> s3://...) ◄──────────────┘
+         ├──► [MicrosoftSasMiddleware] (Авто-получение и кэш SAS-токенов Azure)
          │
-         ▼ (Пакетный Upsert)
+         ├──► Zero-Disk Стрим (.tif, .nc) ──► [MinIO Object Storage (S3)]
+         │                                               │
+         ├──► Двусторонний Self-Healing (DB <-> S3) ◄────┘
+         │
+         ▼ (Upsert метаданных + s3:// / alternate http://)
 [Локальная БД pgSTAC] (PostgreSQL + PostGIS)
+         │
+         ├───────────────────────────┐
+         ▼                           ▼
+[stac-fastapi-pgstac]       [TiTiler-pgstac]
+(REST STAC API :8082)       (Динамический рендер тайлов :8083)
+         │                           │
+         └─────────────┬─────────────┘
+                       ▼
+      [QGIS / Python (pystac-client, stackstac, rioxarray)]
 ```
 
 ### Ключевые возможности
-* **Мультипровайдерность:** Поддержка неограниченного количества независимых источников STAC API и коллекций в едином конфигурационном файле.
-* **Zero-Disk I/O транзит:** Бинарные ассеты не засоряют локальную файловую систему и не изнашивают SSD, а стримятся из сети напрямую в бакеты MinIO через `aws-sdk-s3`.
-* **Универсальность форматов:** Автоматический разбор расширений и корректная работа как с растровой оптикой **COG (`.tif`)**, так и с многомерными научными массивами **NetCDF (`.nc`)**.
-* **Асинхронный параллелизм:** Одновременная загрузка каналов одного снимка с помощью `futures::future::join_all`.
-* **Надежная пагинация:** Безопасный обход страниц выдачи каталогов без паник при отсутствии ссылок `next`.
+* **HTTP Middleware & Auto-Signing:** Встроенная прослойка `reqwest-middleware` автоматически перехватывает запросы к закрытым хранилищам (например, `*.blob.core.windows.net`), запрашивает временные SAS-токены через API и кэширует их в памяти с учётом `msft:expiry`.
+* **Двусторонняя консистентность (Self-Healing):** Перед загрузкой сервис проверяет наличие айтема как в базе `pgstac`, так и физически в бакете MinIO (`head_object`). Если запись в БД есть, а файл на S3 потерян — автоматически запускается восстановление.
+* **Zero-Disk I/O транзит:** Бинарные ассеты не засоряют файловую систему, а стримятся из сети напрямую в бакеты MinIO через `aws-sdk-s3` с проверкой успешности HTTP-статусов (защита от сохранения XML-ошибок под видом растров).
+* **Универсальность форматов:** Корректная обработка растровой оптики **COG (`.tif`)**, многомерных научных массивов **NetCDF (`.nc`)** и табличных данных **Parquet**.
+* **Полный стек раздачи (Docker):** Готовая связка `pgstac` + `stac-fastapi` + `TiTiler` позволяет подключать локальный каталог напрямую в QGIS или аналитические Python-ноутбуки через стандартные библиотеки `pystac-client` и `stackstac`.
 
 ---
 
 ## 🛠 Технологический стек
 
-* **Язык и рантайм:** Rust (2021 edition), `tokio`
+* **Язык и рантайм:** Rust (2021/2024 edition), `tokio`
+* **Сеть и Middleware:** `reqwest`, `reqwest-middleware`, `http`, `async-trait`, `chrono`
 * **STAC Экосистема:** `stac`, `stac-client`, `pgstac` (паттерн Extension Traits поверх `tokio-postgres`)
-* **Хранилище объектов:** `aws-sdk-s3`, `aws-config` (настроено под S3 Path-Style для работы с MinIO)
-* **Сеть и конфигурация:** `reqwest`, `serde`, `toml`, `futures`
+* **Хранилище объектов:** `aws-sdk-s3`, `aws-config` (S3 Path-Style для работы с MinIO)
+* **Инфраструктура (Docker):** `pgstac`, `pgsty/minio`, `stac-fastapi-pgstac`, `titiler-pgstac`
 
 ---
 
@@ -45,33 +57,49 @@
 ```text
 stac_service/
 ├── Cargo.toml                        # Зависимости и фичи крейтов
-├── config.toml                       # Конфигурация инфраструктуры, провайдеров и коллекций
+├── docker-compose.yml                # Инфраструктура: MinIO, pgSTAC, STAC API, TiTiler
+├── config.toml                       # Конфигурация S3/DB, провайдеров и коллекций
 └── src/
-    ├── main.rs                       # Точка входа и запуск сервиса
+    ├── main.rs                       # Точка входа и инициализация пайплайна
     ├── config.rs                     # Структуры и парсер TOML-конфигурации
-    └── sattelite_catalog_service.rs  # Ядро сервиса: пул клиентов, транзит в S3, запись в БД
+    ├── middleware/
+    │   └── microsoft_sas.rs          # HTTP Middleware для подписи и кэширования SAS-токенов
+    └── sattelite_catalog_service.rs  # Ядро: пул клиентов, Self-Healing, транзит в S3, запись в БД
 ```
 
 ---
 
 ## 🚀 Быстрый старт
 
-### 1. Предварительные требования
-Перед запуском убедитесь, что у вас развернуты и доступны:
-1. **MinIO** (или любое S3-совместимое хранилище) с заранее созданным целевым бакетом (например, `yakutia-stac-mirror`).
-2. **PostgreSQL** с установленными расширениями **PostGIS** и **pgSTAC**.
-3. Установленный компилятор **Rust** (`rustup` / `cargo`).
+### 1. Развертывание инфраструктуры (Docker)
+Поднимите хранилище MinIO, базу данных `pgstac`, REST-сервер `stac-api` и тайл-сервер `titiler`:
 
-### 2. Настройка конфигурации
-Создайте файл `config.toml` в корне проекта и укажите параметры вашей инфраструктуры, а также список интересующих провайдеров и коллекций:
+```bash
+docker compose up -d
+```
+
+После запуска станут доступны:
+* **MinIO API / Console:** `http://localhost:65226` / `http://localhost:65227`
+* **PostgreSQL (pgSTAC):** `localhost:5439`
+* **STAC FastAPI (Каталог и поиск):** `http://localhost:8082` (Swagger UI: `/api.html`)
+* **TiTiler (Динамический рендер COG):** `http://localhost:8083`
+
+### 2. Настройка конфигурации (`config.toml`)
+Укажите параметры подключения к локальной инфраструктуре и список целевых коллекций:
 
 ```toml
-[infrastructure]
-minio_endpoint = "http://localhost:9000"
-minio_bucket = "yakutia-stac-mirror"
-minio_access_key = "minioadmin"
-minio_secret_key = "minioadmin"
-postgres_url = "postgresql://postgres:postgres@localhost:5432/postgis"
+[s3_settings]
+endpoint = "http://localhost:65226"
+bucket_name = "geo-data"
+access_key = "minioadmin"
+secret_key = "minioadmin"
+
+[postgres_settings]
+url = "postgresql://username:password@localhost:5439/postgis"
+
+[sync_settings]
+default_max_cloud_cover = 15.0
+start_date = "2025-01-01T00:00:00Z"
 
 # Провайдер 1: Microsoft Planetary Computer
 [[providers]]
@@ -80,14 +108,14 @@ api_url = "https://microsoft.com"
 
   [[providers.collections]]
   id = "landsat-c2-l2"
-  description = "Landsat-9 COG (Оптика высокого разрешения)"
+  description = "Landsat-8/9 COG (Оптика и тепловые каналы)"
   max_cloud_cover = 10.0
   bbox = [105.0, 55.0, 163.0, 74.0]
 
   [[providers.collections]]
-  id = "sentinel-3-olci-lfr"
-  description = "Sentinel-3 NetCDF (Индексы хлорофилла и вегетации)"
-  max_cloud_cover = 20.0
+  id = "sentinel-2-l2a"
+  description = "Sentinel-2 COG (Высокое разрешение 10-20м)"
+  max_cloud_cover = 15.0
   bbox = [105.0, 55.0, 163.0, 74.0]
 
 # Провайдер 2: AWS Element84 Earth Search
@@ -103,7 +131,7 @@ api_url = "https://element84.com"
 ```
 
 ### 3. Сборка и запуск
-Выполните сборку и запуск проекта в release-режиме для максимальной производительности:
+Выполните сборку и запуск проекта в release-режиме:
 
 ```bash
 cargo run --release
@@ -111,19 +139,33 @@ cargo run --release
 
 ---
 
-## 🗄️ Схема хранения данных
+## 🗄️ Схема хранения и интеграция с клиентами
 
-После успешного прогона данные распределяются следующим образом:
-* **В MinIO:** Объекты раскладываются по виртуальным директориям с именем коллекции по шаблону:
-  `<collection_id>/<item_id>_<asset_key>.<ext>`
-  *(Пример: `landsat-c2-l2/LC09_L2SP_128021_20261103_02_T1_red.tif`)*
-* **В pgSTAC:** В таблицах `collections` и `items` регистрируются соответствующие записи. Поля `assets.<key>.href` внутри JSONB-структур автоматически перезаписываются на внутренние адреса формата `s3://<bucket>/<collection_id>/...`, что позволяет подключать локальный каталог к QGIS, TiTiler или аналитическим скриптам на Python/Rust.
+* **В MinIO:** Объекты раскладываются по иерархии провайдера и коллекции (с привязкой общих файлов вроде `preview.png` к `item_id` во избежание коллизий):
+  `<provider>/<collection_id>/<filename>`
+  *(Пример: `microsoft/landsat-c2-l2/LC09_L2SP_128021_20261103_02_T1_SR_B5.TIF`)*
+* **В pgSTAC:** В таблицах `collections` и `items` регистрируются метаданные. Поля `assets.<key>.href` перезаписываются на внутренние пути `s3://geo-data/...` (а при необходимости дополняются расширением `alternate.http.href`).
+
+### Подключение к QGIS и Python
+1. **QGIS:** В панели *Браузер -> STAC -> New Connection* укажите `http://localhost:8082`. Для просмотра растров напрямую из приватного S3 используйте *TiTiler* (`http://localhost:8083`) в качестве XYZ-слоя.
+2. **Python (`pystac-client`):**
+   ```python
+   import pystac_client
+
+   catalog = pystac_client.Client.open("http://localhost:8082")
+   search = catalog.search(collections=["landsat-c2-l2"], bbox=[115.8, -30.2, 116.5, -29.5])
+   items = search.item_collection()
+   ```
 
 ---
 
 ## 🔮 План развития (Roadmap)
-* [ ] **Идемпотентность загрузок:** Проверка наличия объекта в MinIO (`head_object`) перед скачиванием, чтобы пропускать уже выгруженные файлы при перезапуске.
-* [ ] **Авторизация SAS-токенов:** Интеграция автоматического подписания URL для закрытых коллекций Planetary Computer.
-* [ ] **Конвертация в Zarr:** Добавление фонового воркера или генератора виртуальных индексов (Kerchunk) для работы с многомерными кубами данных через `zarrs`.
-* [ ] **Структурированное логирование:** Замена стандартного вывода на `tracing` с поддержкой уровней логирования и ротации.
+* [x] **Идемпотентность и Self-Healing:** Двусторонняя проверка наличия метаданных в `pgstac` и бинарных файлов в MinIO (`head_object`).
+* [x] **Авторизация SAS-токенов:** Внедрение `MicrosoftSasMiddleware` для прозрачной подписи URL и кэширования токенов Azure.
+* [x] **Локальный STAC API и рендер:** Интеграция `stac-fastapi-pgstac` и `titiler-pgstac` в Docker Compose.
+* [ ] **Белый список каналов (`target_assets`):** Фильтрация скачиваемых ассетов на уровне конфигурации для экономии дискового пространства и трафика (исключение служебных масок и метафайлов).
+* [ ] **Ограничение конкурентности и Retry-политики:** Переход на `buffer_unordered` и `reqwest-retry` для защиты от троттлинга при работе на нестабильных каналах.
+* [ ] **Режим `metadata_only`:** Поддержка индексации каталогов без скачивания растров для работы с внешними облаками через HTTP Range-запросы.
+* [ ] **Структурированное логирование:** Замена `println!` на `tracing` с поддержкой уровней логирования.
+
 
