@@ -1,0 +1,57 @@
+services:
+  minio:
+    image: pgsty/minio:latest
+    container_name: geo_storage_s3
+    ports:
+      - "${MINIO_EXTERNAL_API_PORT}:9000"
+      - "${MINIO_EXTERNAL_CONSOLE_PORT}:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+  database:
+    image: ghcr.io/stac-utils/pgstac:v0.9.5
+    container_name: stac-db
+    ports:
+      - "5439:5432"
+    environment:
+      POSTGRES_USER: username
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgis
+      PGUSER: username
+      PGPASSWORD: password
+      PGDATABASE: postgis
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U username -d postgis"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Готовый STAC API Сервер
+  stac-api:
+    image: ghcr.io/stac-utils/stac-fastapi-pgstac:latest
+    container_name: stac-api-server
+    ports:
+      - "8082:8080"       # Навешиваем STAC API наружу
+    environment:
+      - PGHOST=database
+      - PGPORT=5432
+      - PGUSER=username
+      - PGPASSWORD=password
+      - PGDATABASE=postgis
+    depends_on:
+      database:
+        condition: service_healthy # Запустится только когда база примет нужную схему
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+  pgdata:
+
+

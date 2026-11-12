@@ -1,0 +1,135 @@
+[infrastructure.s3]
+endpoint = "http://localhost:65226"
+bucket = "geo-data"
+access_key = "minioadmin"
+secret_key = "minioadmin"
+
+[infrastructure.database]
+host = "localhost"
+port = 5439
+user = "username"
+password = "password"
+dbname = "postgis"
+
+[infrastructure.local_stac]
+api_url = "http://localhost:8082"
+
+[sync_settings]
+default_max_cloud_cover = 15.0
+# Зажимаем таймстемп строго на июнь 2026 года
+start_date = "2025-01-01T00:00:00Z"        # Начало года
+end_date = "2025-12-31T23:59:59Z"          # Конец года
+
+# Под аномалию Мура
+[[providers]]
+name = "microsoft"
+api_url = "https://planetarycomputer.microsoft.com/api/stac/v1"
+
+  [[providers.collections]]
+  id = "landsat-c2-l2"
+  description = "Landsat-9 Оптика/Рельеф на точку Мура"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "io-biodiversity"
+  description = "Sentinel-3 NetCDF Химия атмосферы и Хлорофилл"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "sentinel-2-l2a"
+  description = " Оптика сверхвысокого разрешения Sentinel-2 для поиска стресса растений"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "sentinel-3-olci-lfr-l2-netcdf"
+  description = "This collection provides Sentinel-3 Full Resolution OLCI Level-2 Land products containing data on global vegetation, chlorophyll, and water vapor."
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "modis-13Q1-061"
+  description = "The Moderate Resolution Imaging Spectroradiometer (MODIS) Vegetation Indices Version 6.1 data are generated every 16 days at 250 meter (m) spatial resolution as a Level 3 product. The MOD13Q1 product provides two primary vegetation layers. The first is the Normalized Difference Vegetation Index (NDVI) which is referred to as the continuity index to the existing National Oceanic and Atmospheric Administration-Advanced Very High Resolution Radiometer (NOAA-AVHRR) derived NDVI. The second vegetation layer is the Enhanced Vegetation Index (EVI), which has improved sensitivity over high biomass regions. The algorithm chooses the best available pixel value from all the acquisitions from the 16 day period. The criteria used is low clouds, low view angle, and the highest NDVI/EVI value. Along with the vegetation layers and the two quality layers, the HDF file will have MODIS reflectance bands 1 (red), 2 (near-infrared), 3 (blue), and 7 (mid-infrared), as well as four observation layers."
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "sentinel-5p-l2-netcdf"
+  description = "Химия атмосферы Sentinel-5P в NetCDF формате"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "terraclimate"
+  description = "Климатический водный баланс почвы и давление пара TerraClimate"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "era5-pds"
+  description = "Европейский реанализ ECMWF ERA5 (Температура поверхности и росы)"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "cop-dem-glo-30"
+  description = "Глобальный рельеф NASA SRTM + ICESat для верификации разломов"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "hls2-l30"
+  description = "Гармонизированные данные NASA HLS: Landsat-срез (30м)"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "hls2-s30"
+  description = "Гармонизированные данные NASA HLS: Sentinel-срез (30м)"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "modis-11A2-061"
+  description = "8-дневная температура поверхности земли MODIS (MOD11A2)"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "sentinel-3-slstr-lst-l2-netcdf"
+  description = "Высокоточная температура поверхности суши Sentinel-3 (SLSTR LST)"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "jrc-gsw"
+  description = "35-летний исторический тренд динамики поверхностных вод JRC"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "sentinel-1-grd"
+  description = " C-Band радар Sentinel-1 для фиксации скрытой влажности почвы"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+  [[providers.collections]]
+  id = "alos-palsar-mosaic"
+  description = " L-Band радар ALOS PALSAR — рентген структуры разломов под растительностью"
+  bbox = [115.8, -30.2, 116.5, -29.5]
+
+
+# [[providers]]
+# name = "microsoft"
+# api_url = "https://planetarycomputer.microsoft.com/api/stac/v1"
+#
+#   # Ассеты: .TIF (COG) - Высокое разрешение для структурного анализа
+#   [[providers.collections]]
+#   id = "landsat-c2-l2"
+#   description = "Landsat-9 COG через Microsoft"
+#   bbox = [105.0, 55.0, 163.0, 74.0]
+#
+#   # Ассеты: .NC (NetCDF) - Среднее разрешение, индексы стресса тайги (водород)
+#   [[providers.collections]]
+#   id = "sentinel-3-olci-lfr"
+#   description = "Sentinel-3 NetCDF индексы хлорофилла"
+#   max_cloud_cover = 8.0
+#   bbox = [105.0, 55.0, 163.0, 74.0]
+#
+# [[providers]]
+# name = "element84"
+# api_url = "https://earth-search.aws.element84.com/v1"
+#
+#   # Ассеты: .TIF (COG) - Ультра-четкая альтернатива Sentinel-2
+#   [[providers.collections]]
+#   id = "sentinel-2-12a"
+#   description = "Sentinel-2 COG через AWS Element84"
+#   max_cloud_cover = 12.0
+#   bbox = [129.0, 61.0, 131.0, 63.0]
